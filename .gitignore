@@ -27,6 +27,8 @@ weights/*.pt
 weights/*.onnx
 weights/*.engine
 weights/*.tflite
+weights/*.pth
+
 !weights/.gitkeep
 !weights/README.md
 
