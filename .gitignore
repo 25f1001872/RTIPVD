@@ -1,10 +1,61 @@
-# Ignore virtual environment
-env/
-
-# Ignore videos
-*.mp4
-
-# Python cache
+# ============ Python ============
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
 
+# ============ Virtual Environment ============
+venv/
+env/
+env311/
+.venv/
+.env
+
+# ============ IDE ============
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ============ Model Weights (large files) ============
+weights/*.pt
+weights/*.onnx
+weights/*.engine
+weights/*.tflite
+!weights/.gitkeep
+!weights/README.md
+
+# ============ Data / Videos (large files) ============
+data/videos/*.mp4
+data/videos/*.avi
+data/videos/*.mkv
+data/dataset/images/
+data/dataset/labels/
+!data/videos/.gitkeep
+!data/sample_frames/.gitkeep
+
+# ============ Output (generated at runtime) ============
+output/violations/screenshots/*
+output/violations/logs/*
+output/results/*
+output/db/*.db
+!output/**/.gitkeep
+
+# ============ OS Files ============
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============ Logs ============
+*.log
+logs/
+
+# ============ Misc ============
+*.bak
+*.tmp
+*.swp
