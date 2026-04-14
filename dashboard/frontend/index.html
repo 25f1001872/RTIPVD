@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>RTIPVD Dashboard</title>
+	<link rel="stylesheet" href="/dashboard/static/styles.css">
+</head>
+<body>
+	<main class="container">
+		<header class="header">
+			<h1>RTIPVD Violation Dashboard</h1>
+			<div class="controls">
+				<button id="refreshBtn" type="button">Refresh</button>
+				<label>
+					Auto-refresh
+					<input id="autoRefresh" type="checkbox" checked>
+				</label>
+			</div>
+		</header>
+
+		<section class="status-grid">
+			<article class="card">
+				<h2>Backend</h2>
+				<p id="healthState">Checking...</p>
+			</article>
+			<article class="card">
+				<h2>Records</h2>
+				<p><span id="recordCount">0</span> rows loaded</p>
+			</article>
+		</section>
+
+		<section class="table-card">
+			<table>
+				<thead>
+					<tr>
+						<th>ID</th>
+						<th>Plate</th>
+						<th>First Seen (UTC)</th>
+						<th>Last Seen (UTC)</th>
+						<th>Duration (s)</th>
+						<th>Latitude</th>
+						<th>Longitude</th>
+						<th>Source</th>
+						<th>Confidence</th>
+					</tr>
+				</thead>
+				<tbody id="rows"></tbody>
+			</table>
+		</section>
+	</main>
+
+	<script src="/dashboard/static/app.js"></script>
+</body>
+</html>

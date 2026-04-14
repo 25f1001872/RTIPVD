@@ -22,8 +22,58 @@ Structure:
     11. Phase 2 Settings (Future — commented out)
 """
 
+import os
 import numpy as np
 from pathlib import Path
+
+
+def _env_str(key: str, default: str) -> str:
+    """Read a string environment variable with a fallback default."""
+    value = os.getenv(key)
+    return value if value is not None else default
+
+
+def _env_int(key: str, default: int) -> int:
+    """Read an integer environment variable with a safe fallback."""
+    value = os.getenv(key)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _env_float(key: str, default: float) -> float:
+    """Read a float environment variable with a safe fallback."""
+    value = os.getenv(key)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _env_bool(key: str, default: bool) -> bool:
+    """Read a boolean environment variable using common true/false strings."""
+    value = os.getenv(key)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _resolve_path(path_value: str) -> str:
+    """Resolve relative paths from project root while preserving absolute paths."""
+    path = Path(path_value)
+    if path.is_absolute():
+        return str(path)
+    return str((PROJECT_ROOT / path).resolve())
 
 
 # =============================================================
@@ -36,7 +86,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Device selection for YOLO inference
 # Options: "cuda:0" (GPU), "cpu", or "auto" (let ultralytics decide)
-DEVICE = "cuda:0"
+DEVICE = _env_str("RTIPVD_DEVICE", "cuda:0")
 
 
 # =============================================================
@@ -45,16 +95,16 @@ DEVICE = "cuda:0"
 #    Use (PROJECT_ROOT / "subpath") for absolute resolution.
 # =============================================================
 
-MODEL_PATH = str(PROJECT_ROOT / "weights" / "best.pt")
-VIDEO_SOURCE = str(PROJECT_ROOT / "data" / "videos" / "d1.mp4")
-TRACKER_CONFIG = str(PROJECT_ROOT / "config" / "bytetrack.yaml")
+MODEL_PATH = _resolve_path(_env_str("RTIPVD_MODEL_PATH", "weights/best.pt"))
+VIDEO_SOURCE = _resolve_path(_env_str("RTIPVD_VIDEO_SOURCE", "data/videos/d1.mp4"))
+TRACKER_CONFIG = _resolve_path(_env_str("RTIPVD_TRACKER_CONFIG", "config/bytetrack.yaml"))
 
 # Output directories (auto-created at runtime if missing)
-OUTPUT_DIR = str(PROJECT_ROOT / "output")
-VIOLATIONS_DIR = str(PROJECT_ROOT / "output" / "violations")
-SCREENSHOTS_DIR = str(PROJECT_ROOT / "output" / "violations" / "screenshots")
-LOGS_DIR = str(PROJECT_ROOT / "output" / "violations" / "logs")
-RESULTS_DIR = str(PROJECT_ROOT / "output" / "results")
+OUTPUT_DIR = _resolve_path(_env_str("RTIPVD_OUTPUT_DIR", "output"))
+VIOLATIONS_DIR = _resolve_path(_env_str("RTIPVD_VIOLATIONS_DIR", "output/violations"))
+SCREENSHOTS_DIR = _resolve_path(_env_str("RTIPVD_SCREENSHOTS_DIR", "output/violations/screenshots"))
+LOGS_DIR = _resolve_path(_env_str("RTIPVD_LOGS_DIR", "output/violations/logs"))
+RESULTS_DIR = _resolve_path(_env_str("RTIPVD_RESULTS_DIR", "output/results"))
 
 
 # =============================================================
@@ -210,13 +260,13 @@ VEHICLE_KEYWORDS = (
 
 # Whether to use a mock/fake plate reader (for testing without
 # GPU-heavy EasyOCR model loading). Set True during development.
-USE_MOCK_OCR = False
+USE_MOCK_OCR = _env_bool("RTIPVD_USE_MOCK_OCR", False)
 
 # OCR language — 'en' for English/alphanumeric plates
 OCR_LANGUAGE = ['en']
 
 # Use GPU for EasyOCR inference (recommended with your RTX 4050)
-OCR_USE_GPU = True
+OCR_USE_GPU = _env_bool("RTIPVD_OCR_USE_GPU", True)
 
 # Rolling window size for temporal majority voting.
 # Plate text is read across multiple frames; the most
@@ -241,39 +291,49 @@ PLATE_REGEX_PATTERN = r"^[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{1,4}$"
 
 # Show green-tinted lane mask overlay on the output frame.
 # Useful for debugging ego-motion. Set False for clean output.
-DEBUG_LANE_OVERLAY = True
+DEBUG_LANE_OVERLAY = _env_bool("RTIPVD_DEBUG_LANE_OVERLAY", True)
 
 # Show the output window (set False for headless/server mode)
-SHOW_DISPLAY = True
+SHOW_DISPLAY = _env_bool("RTIPVD_SHOW_DISPLAY", True)
 
 # Window name for OpenCV display
-WINDOW_NAME = "RTIPVD — Parking Detection System"
+WINDOW_NAME = _env_str("RTIPVD_WINDOW_NAME", "RTIPVD — Parking Detection System")
 
 
 # =============================================================
-# 11. PHASE 2 SETTINGS (Future — uncomment when implementing)
+# 11. PHASE 2 SETTINGS (Database, GPS, Backend API)
 # =============================================================
 
 # --- Database ---
-# DB_PATH = str(PROJECT_ROOT / "output" / "db" / "rtipvd.db")
-# DB_TYPE = "sqlite"  # Options: "sqlite", "firebase"
+DB_ENABLED = _env_bool("RTIPVD_DB_ENABLED", True)
+DB_PATH = _resolve_path(_env_str("RTIPVD_DB_PATH", "output/db/rtipvd.db"))
+DB_MERGE_WINDOW_SECONDS = _env_float("RTIPVD_DB_MERGE_WINDOW_SECONDS", 120.0)
 
 # --- GPS ---
-# GPS_ENABLED = False
-# GPS_SOURCE = "serial"  # Options: "serial", "gpsd", "mock"
-# GPS_SERIAL_PORT = "/dev/ttyUSB0"
-# GPS_BAUD_RATE = 9600
+GPS_ENABLED = _env_bool("RTIPVD_GPS_ENABLED", False)
+GPS_SOURCE = _env_str("RTIPVD_GPS_SOURCE", "serial")  # Options: serial, mock
+GPS_SERIAL_PORT = _env_str("RTIPVD_GPS_SERIAL_PORT", "/dev/ttyUSB0")
+GPS_BAUD_RATE = _env_int("RTIPVD_GPS_BAUD_RATE", 9600)
+GPS_READ_TIMEOUT_MS = _env_int("RTIPVD_GPS_READ_TIMEOUT_MS", 300)
+GPS_MOCK_LAT = _env_float("RTIPVD_GPS_MOCK_LAT", 28.7041)
+GPS_MOCK_LON = _env_float("RTIPVD_GPS_MOCK_LON", 77.1025)
 
-# --- Map Overlay ---
-# MAP_PROVIDER = "openstreetmap"  # Options: "openstreetmap", "google"
-# GOOGLE_MAPS_API_KEY = ""        # Only if MAP_PROVIDER = "google"
+# --- Backend Upload ---
+BACKEND_ENABLED = _env_bool("RTIPVD_BACKEND_ENABLED", False)
+BACKEND_URL = _env_str("RTIPVD_BACKEND_URL", "http://127.0.0.1:5000/api/violations")
+BACKEND_API_KEY = _env_str("RTIPVD_BACKEND_API_KEY", "")
+BACKEND_TIMEOUT_SEC = _env_float("RTIPVD_BACKEND_TIMEOUT_SEC", 5.0)
+BACKEND_VERIFY_SSL = _env_bool("RTIPVD_BACKEND_VERIFY_SSL", True)
 
-# --- Dashboard ---
-# DASHBOARD_HOST = "0.0.0.0"
-# DASHBOARD_PORT = 5000
-# DASHBOARD_DEBUG = True
+# --- Dashboard Backend Host ---
+DASHBOARD_HOST = _env_str("RTIPVD_DASHBOARD_HOST", "0.0.0.0")
+DASHBOARD_PORT = _env_int("RTIPVD_DASHBOARD_PORT", 5000)
+DASHBOARD_DEBUG = _env_bool("RTIPVD_DASHBOARD_DEBUG", False)
 
-# --- Edge Deployment ---
-# USE_TENSORRT = False
-# ONNX_MODEL_PATH = str(PROJECT_ROOT / "weights" / "best.onnx")
-# TENSORRT_MODEL_PATH = str(PROJECT_ROOT / "weights" / "best.engine")
+# --- Stream Transport (Pi -> Laptop) ---
+STREAM_SERVER_HOST = _env_str("RTIPVD_STREAM_SERVER_HOST", "0.0.0.0")
+STREAM_SERVER_PORT = _env_int("RTIPVD_STREAM_SERVER_PORT", 8088)
+STREAM_SERVER_URL = _env_str("RTIPVD_STREAM_SERVER_URL", "http://127.0.0.1:8088/ingest/frame")
+STREAM_SEND_FPS = _env_float("RTIPVD_STREAM_SEND_FPS", 8.0)
+STREAM_JPEG_QUALITY = _env_int("RTIPVD_STREAM_JPEG_QUALITY", 70)
+STREAM_DEFAULT_HEADING_DEG = _env_float("RTIPVD_STREAM_DEFAULT_HEADING_DEG", 0.0)

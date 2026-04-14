@@ -21,6 +21,10 @@ easyocr>=1.7.1                  # Deep learning OCR for plate reading
 Pillow>=10.0.0                  # Image handling (easyocr dependency)
 PyYAML>=6.0                     # YAML parsing (bytetrack.yaml config)
 tqdm>=4.65.0                    # Progress bars (ultralytics dependency)
+requests>=2.31.0                # Backend API sync from detection pipeline
+pyserial>=3.5                   # GPS serial module communication (ESP32/NEO-6M)
+flask>=3.0.0                    # Stream receiver/server endpoints
+flask-cors>=4.0.0               # Cross-origin and API compatibility
 
 # ==============================================================
 # PHASE 2 — Uncomment when implementing

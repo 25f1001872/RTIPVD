@@ -9,8 +9,10 @@ Modules:
     analyzer        - Parking classification + adaptive calibration
     ocr             - License plate detection, reading, and validation
     visualization   - Frame rendering + stats overlay
-    evidence        - [Phase 2] Screenshot capture, GPS, map overlay
-    database        - [Phase 2] Violation storage and querying
+    evidence        - Screenshot capture, GPS, map overlay
+    database        - Local storage and backend sync
+    geospatial      - Vehicle coordinate projection from camera GPS
+    streaming       - Pi-to-laptop packet transport + GPS sync
     utils           - Shared utilities (logging, timing, validation)
 """
 
