@@ -1,127 +1,100 @@
-# 🚗 RTIPVD — Real-Time Illegal Parking Vehicle Detection
+# RTIPVD - Real-Time Illegal Parking Vehicle Detection
 
-> **IIT Roorkee | 2025**
+> IIT Roorkee | 2025
 
-A real-time system for detecting illegally parked vehicles from **moving cameras** (dashcam, drone, patrol vehicle) using computer vision and deep learning.
+RTIPVD detects illegally parked vehicles from moving-camera video using YOLOv8 + ByteTrack, ego-motion compensation, and plate OCR.
 
----
+## New Deployment Direction (Recommended)
 
-## ✨ Key Features
+Raspberry Pi now acts as a sender node:
 
-| Feature | Description |
-|---------|-------------|
-| 🎥 **Moving Camera Support** | Works on dashcams, drones, patrol vehicles — not limited to fixed CCTV |
-| 🛣️ **Ego-Motion Compensation** | Lane-anchored optical flow + RANSAC homography separates camera motion from vehicle motion |
-| 🎯 **YOLOv8 + ByteTrack** | Custom-trained vehicle detection with persistent multi-object tracking |
-| 📊 **Auto-Calibrating Threshold** | P80-based adaptive threshold self-tunes to any video in first 60 frames |
-| 🔍 **License Plate OCR** | EasyOCR with Indian plate regex validation and temporal majority voting |
-| 🛡️ **Jitter-Resilient** | EMA smoothing + forgiveness frames prevent false classifications |
-| 🌙 **Night Mode** | CLAHE-based automatic enhancement for low-light scenarios |
+1. Pi sends compressed video frames over network.
+2. Pi sends synchronized camera GPS telemetry with each frame.
+3. Laptop acts as processing server (detection + geospatial projection).
 
----
+Key scripts:
 
-## 🏗️ Architecture
+- Pi sender: `deploy/raspberry_pi/send_video_and_gps.py`
+- Pi wrapper: `deploy/raspberry_pi/send_stream.sh`
+- Laptop stream server: `scripts/laptop_stream_server.py`
+- Laptop wrapper: `deploy/laptop/start_stream_server.ps1`
+- Geospatial utility: `scripts/calculate_vehicle_geocoords.py`
 
-Video Input → Preprocessing → Dual Pipeline:
-├── Vehicle Detection (YOLOv8) + Tracking (ByteTrack)
-└── Lane Detection (HSV) + Ego-Motion (LK + Homography)
-↓
-Motion Analysis (ego-compensated) → Parking Decision → Plate OCR → Display
+## Features
 
+- Moving camera support (dashcam/drone/patrol videos)
+- Ego-motion compensation from lane optical flow
+- Vehicle detection + persistent tracking
+- Adaptive parked/moving threshold calibration
+- Plate OCR with regex validation and temporal voting
+- Local violation database (SQLite)
+- Optional GPS tagging (ESP32 + NEO-6M serial)
+- Optional backend sync + dashboard API
 
----
+## Architecture
 
-## 📁 Project Structure
-RTIPVD/
-├── main.py # Entry point
-├── config/ # Configuration
-│ ├── config.py # All parameters
-│ └── bytetrack.yaml # Tracker config
-├── src/ # Source code
-│ ├── preprocessing/ # Frame enhancement
-│ ├── detection/ # YOLOv8 + ByteTrack
-│ ├── ego_motion/ # Lane detection + optical flow
-│ ├── analyzer/ # Parking decision + calibration
-│ ├── ocr/ # License plate reading
-│ ├── visualization/ # Rendering + stats overlay
-│ ├── evidence/ # [Phase 2] Screenshots, GPS, maps
-│ ├── database/ # [Phase 2] Violation storage
-│ └── utils/ # Logging, timing, validators
-├── weights/ # Model weights (.gitignored)
-├── data/ # Videos and datasets
-├── output/ # Generated output
-├── docs/ # Documentation
-└── scripts/ # Utility scripts
+Video input -> preprocessing -> detection/tracking + lane ego-motion -> parked decision -> OCR -> violation service
 
+Violation service:
+- tags GPS coordinates
+- saves/updates SQLite rows
+- optionally posts to backend API
 
----
+## Project Structure
 
-## 🚀 Quick Start
+- main pipeline: `main.py`
+- config: `config/config.py`
+- source modules: `src/`
+- backend API: `dashboard/backend/`
+- dashboard frontend: `dashboard/frontend/`
+- deployment profiles:
+	- laptop: `deploy/laptop/`
+	- raspberry pi: `deploy/raspberry_pi/`
 
-### Prerequisites
-- Python 3.11.9
-- NVIDIA GPU with CUDA 12.1 (tested on RTX 4050)
-- NVIDIA drivers installed
+## Quick Start (Laptop)
 
-### Installation
+1. Clone repo and enter folder.
+2. Create virtual env and activate.
+3. Install dependencies.
+4. Copy model to `weights/best.pt`.
+5. Copy test video to `data/videos/d1.mp4`.
+6. Run setup verifier.
+7. Run backend and pipeline.
 
 ```powershell
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/RTIPVD.git
-cd RTIPVD
-
-# Create virtual environment
-py -3.11 -m venv venv
-.\venv\Scripts\Activate.ps1
-
-# Install PyTorch with CUDA
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Place your model weights
-# Copy best.pt to weights/best.pt
-
-# Place your test video
-# Copy your video to data/videos/d1.mp4
-
-# Verify setup
+pip install -r dashboard/backend/requirements.txt
 python scripts/verify_setup.py
-
-# Run
+python dashboard/backend/app.py
 python main.py
+```
 
-Controls
-Press q to quit
-🎯 Tech Stack
-Component	Technology
-Detection	YOLOv8 (custom trained)
-Tracking	ByteTrack
-Ego-Motion	Lucas-Kanade Optical Flow + RANSAC Homography
-Lane Detection	HSV Color Filtering + Canny Edge
-OCR	EasyOCR
-Preprocessing	OpenCV CLAHE
-Language	Python 3.11.9
-GPU	NVIDIA CUDA 12.1
+## Quick Start (Raspberry Pi)
 
-📋 Configuration
-All parameters are in config/config.py:
+Use the Raspberry Pi deployment profile:
 
-Parameter	Default	Description
-PARKED_SECONDS	5.0	Seconds stationary before flagging
-CALIBRATION_FRAMES	60	Frames for auto-threshold calibration
-CENTROID_EMA_ALPHA	0.35	Smoothing factor for centroid jitter
-FORGIVENESS_FRAMES	10	Jitter tolerance before counter reset
-MIN_BBOX_HEIGHT	120	Minimum bbox height (skip far vehicles)
-MAX_BBOX_HEIGHT	800	Maximum bbox height (skip close vehicles)
+```bash
+bash deploy/raspberry_pi/setup.sh
+bash deploy/raspberry_pi/run_pi.sh
+```
 
-🔜 Roadmap (Phase 2)
- Database integration (SQLite — plate as primary key)
- Frame screenshot as violation evidence
- GPS coordinates from recording camera
- Google Maps / OSM overlay for zone verification
- Duration logging (how long vehicle was parked)
- Web dashboard for traffic authorities
- Edge deployment (Jetson Nano / Raspberry Pi)
- Automated e-challan generation
+For full beginner steps, see:
+- `docs/BEGINNER_GUIDE.md`
+- `docs/STREAMING_ARCHITECTURE.md`
+- `deploy/laptop/README.md`
+- `deploy/raspberry_pi/README.md`
+
+## Backend API
+
+- `GET /api/health`
+- `GET /api/violations?limit=100`
+- `POST /api/violations`
+
+## Notes
+
+- Config supports environment variables (`RTIPVD_*`) for profile-based runs.
+- CPU-only mode is supported for Raspberry Pi.
+- If backend is disabled, all violations are still stored locally in SQLite.

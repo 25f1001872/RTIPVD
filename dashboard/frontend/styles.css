@@ -1,0 +1,110 @@
+:root {
+	--bg: #f4f6fb;
+	--card: #ffffff;
+	--text: #122236;
+	--muted: #4d6280;
+	--primary: #0f5bff;
+	--line: #d8e1ef;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+	background: var(--bg);
+	color: var(--text);
+}
+
+.container {
+	max-width: 1200px;
+	margin: 0 auto;
+	padding: 1rem;
+}
+
+.header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+}
+
+.header h1 {
+	margin: 0;
+	font-size: 1.6rem;
+}
+
+.controls {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+}
+
+button {
+	background: var(--primary);
+	color: white;
+	border: none;
+	border-radius: 8px;
+	padding: 0.55rem 0.9rem;
+	cursor: pointer;
+	font-weight: 600;
+}
+
+button:hover {
+	filter: brightness(0.95);
+}
+
+.status-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: 1rem;
+	margin: 1rem 0;
+}
+
+.card,
+.table-card {
+	background: var(--card);
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	padding: 0.9rem;
+}
+
+.card h2 {
+	margin: 0 0 0.3rem;
+	font-size: 1.1rem;
+}
+
+.card p {
+	margin: 0;
+	color: var(--muted);
+}
+
+.table-card {
+	overflow-x: auto;
+}
+
+table {
+	width: 100%;
+	border-collapse: collapse;
+	min-width: 900px;
+}
+
+th,
+td {
+	border-bottom: 1px solid var(--line);
+	padding: 0.55rem;
+	text-align: left;
+	font-size: 0.92rem;
+}
+
+th {
+	background: #f1f6ff;
+	color: #1d3554;
+}
+
+tr:hover td {
+	background: #f8fbff;
+}

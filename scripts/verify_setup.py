@@ -34,17 +34,35 @@ def main():
         "Install Python 3.11.x from python.org",
     )
 
+    # Determine whether CUDA is expected for this profile.
+    try:
+        from config.config import DEVICE
+    except Exception:
+        DEVICE = "cuda:0"
+    expects_cuda = str(DEVICE).lower().startswith("cuda")
+
     # --- PyTorch + CUDA ---
     print("\n[2/8] PyTorch + CUDA")
     try:
         import torch
         all_ok &= check(f"PyTorch {torch.__version__}", True)
-        all_ok &= check(
-            f"CUDA available: {torch.cuda.is_available()}",
-            torch.cuda.is_available(),
-            "Reinstall PyTorch with CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu121",
-        )
-        if torch.cuda.is_available():
+        if expects_cuda:
+            all_ok &= check(
+                f"CUDA available: {torch.cuda.is_available()}",
+                torch.cuda.is_available(),
+                "Reinstall PyTorch with CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu121",
+            )
+        else:
+            all_ok &= check(
+                f"CPU profile detected (DEVICE={DEVICE})",
+                True,
+            )
+            check(
+                f"CUDA available: {torch.cuda.is_available()} (optional in CPU profile)",
+                True,
+            )
+
+        if torch.cuda.is_available() and expects_cuda:
             check(f"GPU: {torch.cuda.get_device_name(0)}", True)
     except ImportError:
         all_ok &= check("PyTorch installed", False, "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121")
@@ -120,6 +138,13 @@ def main():
         ("src.ocr.plate_reader", "Plate Reader"),
         ("src.visualization.frame_renderer", "Frame Renderer"),
         ("src.visualization.stats_overlay", "Stats Overlay"),
+        ("src.database.db_manager", "Database Manager"),
+        ("src.database.backend_client", "Backend Client"),
+        ("src.evidence.gps_tagger", "GPS Tagger"),
+        ("src.evidence.violation_service", "Violation Service"),
+        ("src.geospatial.vehicle_geo_mapper", "Geo Mapper"),
+        ("src.streaming.packet", "Stream Packet"),
+        ("src.streaming.sync", "GPS Sync Buffer"),
     ]
 
     for module_path, name in modules:

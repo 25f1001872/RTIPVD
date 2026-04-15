@@ -8,6 +8,13 @@ Handles violation data storage and retrieval:
     - Duration of illegal parking
 """
 
-# Phase 2 — imports will be added when modules are implemented
-# from src.database.db_manager import DatabaseManager
-# from src.database.models import ViolationRecord
+from src.database.backend_client import BackendClient
+from src.database.db_manager import DatabaseManager
+from src.database.models import GPSFix, ViolationRecord
+
+__all__ = [
+    "BackendClient",
+    "DatabaseManager",
+    "GPSFix",
+    "ViolationRecord",
+]

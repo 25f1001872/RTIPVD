@@ -40,6 +40,7 @@ data/dataset/images/
 data/dataset/labels/
 !data/videos/.gitkeep
 !data/sample_frames/.gitkeep
+*.mp4
 
 # ============ Output (generated at runtime) ============
 output/violations/screenshots/*

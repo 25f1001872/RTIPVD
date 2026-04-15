@@ -6,7 +6,10 @@ Handles violation evidence capture:
     - Map overlay (Google Maps / OpenStreetMap)
 """
 
-# Phase 2 — imports will be added when modules are implemented
-# from src.evidence.screenshot_capture import ScreenshotCapture
-# from src.evidence.gps_tagger import GPSTagger
-# from src.evidence.map_overlay import MapOverlay
+from src.evidence.gps_tagger import GPSTagger
+from src.evidence.violation_service import ViolationService
+
+__all__ = [
+    "GPSTagger",
+    "ViolationService",
+]

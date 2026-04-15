@@ -58,6 +58,10 @@ from src.detection.vehicle_tracker import VehicleTracker
 from src.ego_motion.lane_detector import LaneDetector
 from src.ego_motion.motion_estimator import EgoMotionEstimator
 from src.analyzer.parking_analyzer import ParkingAnalyzer
+from src.database.backend_client import BackendClient
+from src.database.db_manager import DatabaseManager
+from src.evidence.gps_tagger import GPSTagger
+from src.evidence.violation_service import ViolationService
 from src.ocr.plate_reader import PlateReader
 from src.visualization.frame_renderer import FrameRenderer
 from src.visualization.stats_overlay import StatsOverlay
@@ -95,7 +99,7 @@ def initialize_video(source: str) -> tuple:
     return cap, fps
 
 
-def initialize_modules(fps: float) -> dict:
+def initialize_modules(fps: float, video_source: str) -> dict:
     """
     Initialize all pipeline modules.
 
@@ -136,6 +140,21 @@ def initialize_modules(fps: float) -> dict:
     renderer = FrameRenderer()
     overlay = StatsOverlay()
 
+    # --- Evidence + Persistence + Backend Sync ---
+    db_manager = DatabaseManager()
+    gps_tagger = GPSTagger()
+    backend_client = BackendClient()
+    violation_service = ViolationService(
+        db_manager=db_manager,
+        gps_tagger=gps_tagger,
+        backend_client=backend_client,
+        video_source=video_source,
+    )
+
+    print(f"[INIT] {db_manager}")
+    print(f"[INIT] {gps_tagger}")
+    print(f"[INIT] {backend_client}")
+
     print("[INIT] All modules initialized successfully.\n")
 
     return {
@@ -148,6 +167,7 @@ def initialize_modules(fps: float) -> dict:
         "plate_reader": plate_reader,
         "renderer": renderer,
         "overlay": overlay,
+        "violation_service": violation_service,
     }
 
 
@@ -176,6 +196,7 @@ def process_frame(
     plate_reader = modules["plate_reader"]
     renderer = modules["renderer"]
     overlay = modules["overlay"]
+    violation_service = modules["violation_service"]
 
     # Get original frame and detection boxes
     orig_frame = result.orig_img.copy()
@@ -222,6 +243,7 @@ def process_frame(
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             track_id = int(box.id[0]) if box.id is not None else -1
             cls_id = int(box.cls[0])
+            confidence = float(box.conf[0]) if box.conf is not None else None
 
             # --- Filter: skip non-vehicles and untracked detections ---
             if track_id < 0 or not tracker.is_vehicle(cls_id):
@@ -249,6 +271,13 @@ def process_frame(
                 else:
                     plate_text = read_plates[track_id]
 
+                violation_service.report_parked(
+                    track_id=track_id,
+                    plate_text=plate_text,
+                    frame_idx=frame_idx,
+                    confidence=confidence,
+                )
+
             # --- Draw vehicle annotation ---
             renderer.draw_vehicle(
                 display_frame,
@@ -269,13 +298,17 @@ def process_frame(
     # detected for STALE_TRACK_SECONDS. Also clean up their
     # plate reading history.
     # ==========================================================
+    track_ids_before = set(analyzer.track_states.keys())
     purged_count = analyzer.purge_stale_tracks(frame_idx)
+    track_ids_after = set(analyzer.track_states.keys())
+    purged_track_ids = track_ids_before - track_ids_after
 
     # Clean plate history for purged tracks
     if purged_count > 0:
-        for tid in list(plate_reader._history.keys()):
-            if tid not in analyzer.track_states:
-                plate_reader.clear_track(tid)
+        for tid in purged_track_ids:
+            plate_reader.clear_track(tid)
+
+    violation_service.close_inactive_tracks(track_ids_after)
 
     # ==========================================================
     # STAGE 6: STATS OVERLAY
@@ -322,7 +355,7 @@ def main():
     # ----------------------------------------------------------
     # Step 2: Initialize all pipeline modules
     # ----------------------------------------------------------
-    modules = initialize_modules(fps)
+    modules = initialize_modules(fps, VIDEO_SOURCE)
 
     # ----------------------------------------------------------
     # Step 3: Start tracking stream
@@ -365,6 +398,8 @@ def main():
         # ----------------------------------------------------------
         cap.release()
         cv2.destroyAllWindows()
+
+        modules["violation_service"].close()
 
         # Print summary
         print(f"\n{'=' * 60}")
