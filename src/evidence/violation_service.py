@@ -6,12 +6,15 @@ optional backend API sync for parked vehicle incidents.
 """
 
 from datetime import timedelta
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional, Tuple
+from config.config import ILLEGAL_PARKING_DEFAULT_HEADING_DEG
 
 from src.database.backend_client import BackendClient
 from src.database.db_manager import DatabaseManager
 from src.database.models import ViolationRecord, utc_now
 from src.evidence.gps_tagger import GPSTagger
+from src.geospatial.vehicle_geo_mapper import VehicleGeoMapper
+from src.geospatial.zone_checker import NoParkingZoneChecker
 
 
 class ViolationService:
@@ -26,12 +29,18 @@ class ViolationService:
         backend_client: BackendClient,
         video_source: str,
         min_report_interval_frames: int = 5,
+        geo_mapper: Optional[VehicleGeoMapper] = None,
+        zone_checker: Optional[NoParkingZoneChecker] = None,
+        default_heading_deg: float = ILLEGAL_PARKING_DEFAULT_HEADING_DEG,
     ):
         self.db_manager = db_manager
         self.gps_tagger = gps_tagger
         self.backend_client = backend_client
         self.video_source = video_source
         self.min_report_interval_frames = max(1, int(min_report_interval_frames))
+        self.geo_mapper = geo_mapper
+        self.zone_checker = zone_checker
+        self.default_heading_deg = float(default_heading_deg)
 
         self._active_tracks: Dict[int, Dict[str, object]] = {}
 
@@ -41,6 +50,8 @@ class ViolationService:
         plate_text: str,
         frame_idx: int,
         confidence: Optional[float] = None,
+        bbox_xyxy: Optional[Tuple[int, int, int, int]] = None,
+        frame_shape: Optional[Tuple[int, int]] = None,
     ) -> Optional[int]:
         """Persist one parked observation and optionally sync it to backend."""
         plate = (plate_text or "").strip().upper()
@@ -68,6 +79,19 @@ class ViolationService:
             return state.get("violation_id")
 
         gps_fix = self.gps_tagger.get_latest()
+        latitude, longitude = self._estimate_vehicle_coordinates(
+            gps_fix=gps_fix,
+            bbox_xyxy=bbox_xyxy,
+            frame_shape=frame_shape,
+        )
+
+        # If geofence checking is enabled, only persist records that fall inside configured zones.
+        zone_match = None
+        if self.zone_checker is not None and self.zone_checker.enabled:
+            zone_match = self.zone_checker.find_zone(latitude, longitude)
+            if zone_match is None:
+                state["last_seen"] = now
+                return state.get("violation_id")
         first_seen = state.get("first_seen", now)
         duration = max((now - first_seen).total_seconds(), 0.0)
 
@@ -76,8 +100,8 @@ class ViolationService:
             first_seen=first_seen,
             last_seen=now,
             duration_sec=duration,
-            latitude=gps_fix.latitude if gps_fix.fix else None,
-            longitude=gps_fix.longitude if gps_fix.fix else None,
+            latitude=latitude,
+            longitude=longitude,
             screenshot_path=None,
             video_source=self.video_source,
             confidence=confidence,
@@ -90,6 +114,11 @@ class ViolationService:
 
         if violation_id is not None:
             event_type = "created" if inserted else "updated"
+            if zone_match is not None:
+                print(
+                    f"[ViolationService] Illegal parking in zone '{zone_match.zone_name}' "
+                    f"(zone_id={zone_match.zone_id}) for plate={plate}"
+                )
             self.backend_client.send_violation(
                 record,
                 violation_id=violation_id,
@@ -97,6 +126,45 @@ class ViolationService:
             )
 
         return violation_id
+
+    def _estimate_vehicle_coordinates(
+        self,
+        gps_fix,
+        bbox_xyxy: Optional[Tuple[int, int, int, int]],
+        frame_shape: Optional[Tuple[int, int]],
+    ) -> Tuple[Optional[float], Optional[float]]:
+        """
+        Estimate vehicle coordinates from camera GPS + detection box.
+
+        Fallback order:
+            1) Vehicle geolocation via VehicleGeoMapper (preferred)
+            2) Camera GPS coordinates (if available)
+            3) None, None when no fix is available
+        """
+        if not gps_fix.fix or gps_fix.latitude is None or gps_fix.longitude is None:
+            return None, None
+
+        if self.geo_mapper is None or bbox_xyxy is None or frame_shape is None:
+            return float(gps_fix.latitude), float(gps_fix.longitude)
+
+        frame_h, frame_w = frame_shape
+        heading = (
+            float(gps_fix.heading_deg)
+            if gps_fix.heading_deg is not None
+            else self.default_heading_deg
+        )
+
+        estimate = self.geo_mapper.estimate_from_bbox(
+            camera_lat=float(gps_fix.latitude),
+            camera_lon=float(gps_fix.longitude),
+            camera_heading_deg=heading,
+            bbox_xyxy=tuple(map(float, bbox_xyxy)),
+            frame_shape=(int(frame_h), int(frame_w)),
+        )
+        if estimate is None:
+            return float(gps_fix.latitude), float(gps_fix.longitude)
+
+        return float(estimate.latitude), float(estimate.longitude)
 
     def close_inactive_tracks(self, active_track_ids: Iterable[int]) -> int:
         """Drop local state for tracks that disappeared and send final sync."""
@@ -136,5 +204,7 @@ class ViolationService:
             f"active_tracks={len(self._active_tracks)}, "
             f"db_ready={self.db_manager.is_ready}, "
             f"gps_ready={self.gps_tagger.is_ready}, "
-            f"backend_ready={self.backend_client.is_ready})"
+            f"backend_ready={self.backend_client.is_ready}, "
+            f"geo_mapper={'on' if self.geo_mapper is not None else 'off'}, "
+            f"zone_checker={'on' if (self.zone_checker is not None and self.zone_checker.enabled) else 'off'})"
         )

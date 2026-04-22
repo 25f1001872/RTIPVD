@@ -50,6 +50,10 @@ from config.config import (
     DEBUG_LANE_OVERLAY,
     SHOW_DISPLAY,
     WINDOW_NAME,
+    ILLEGAL_PARKING_GEOJSON_ENABLED,
+    ILLEGAL_PARKING_GEOJSON_PATH,
+    GEO_MAPPER_HFOV_DEG,
+    ILLEGAL_PARKING_DEFAULT_HEADING_DEG,
 )
 
 from src.preprocessing.frame_processor import FrameProcessor
@@ -62,6 +66,8 @@ from src.database.backend_client import BackendClient
 from src.database.db_manager import DatabaseManager
 from src.evidence.gps_tagger import GPSTagger
 from src.evidence.violation_service import ViolationService
+from src.geospatial.vehicle_geo_mapper import VehicleGeoMapper
+from src.geospatial.zone_checker import NoParkingZoneChecker
 from src.ocr.plate_reader import PlateReader
 from src.visualization.frame_renderer import FrameRenderer
 from src.visualization.stats_overlay import StatsOverlay
@@ -144,16 +150,26 @@ def initialize_modules(fps: float, video_source: str) -> dict:
     db_manager = DatabaseManager()
     gps_tagger = GPSTagger()
     backend_client = BackendClient()
+    geo_mapper = VehicleGeoMapper(horizontal_fov_deg=GEO_MAPPER_HFOV_DEG)
+    zone_checker = NoParkingZoneChecker(
+        enabled=ILLEGAL_PARKING_GEOJSON_ENABLED,
+        geojson_path=ILLEGAL_PARKING_GEOJSON_PATH,
+    )
     violation_service = ViolationService(
         db_manager=db_manager,
         gps_tagger=gps_tagger,
         backend_client=backend_client,
         video_source=video_source,
+        geo_mapper=geo_mapper,
+        zone_checker=zone_checker,
+        default_heading_deg=ILLEGAL_PARKING_DEFAULT_HEADING_DEG,
     )
 
     print(f"[INIT] {db_manager}")
     print(f"[INIT] {gps_tagger}")
     print(f"[INIT] {backend_client}")
+    print(f"[INIT] {geo_mapper}")
+    print(f"[INIT] {zone_checker}")
 
     print("[INIT] All modules initialized successfully.\n")
 
@@ -276,6 +292,8 @@ def process_frame(
                     plate_text=plate_text,
                     frame_idx=frame_idx,
                     confidence=confidence,
+                    bbox_xyxy=(x1, y1, x2, y2),
+                    frame_shape=orig_frame.shape[:2],
                 )
 
             # --- Draw vehicle annotation ---
