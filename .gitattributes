@@ -1,0 +1,5 @@
+# Ensure shell scripts keep Unix line endings for Raspberry Pi.
+*.sh text eol=lf
+
+# Keep PowerShell scripts with Windows-style line endings.
+*.ps1 text eol=crlf

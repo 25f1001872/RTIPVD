@@ -11,9 +11,15 @@ Each packet contains:
 import argparse
 import time
 from pathlib import Path
+import sys
 
 import cv2
 import requests
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.evidence.gps_tagger import GPSTagger
 from src.streaming.packet import FrameTelemetryPacket

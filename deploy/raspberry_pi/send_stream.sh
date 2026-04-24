@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
+export PYTHONPATH="$ROOT_DIR:${PYTHONPATH:-}"
 
 if [ ! -d ".venv" ]; then
     echo "Virtual environment not found. Run deploy/raspberry_pi/setup.sh first."
@@ -20,9 +21,16 @@ VIDEO_SOURCE="${RTIPVD_VIDEO_SOURCE:-data/videos/d1.mp4}"
 SERVER_URL="${RTIPVD_STREAM_SERVER_URL:-http://127.0.0.1:8088/ingest/frame}"
 SEND_FPS="${RTIPVD_STREAM_SEND_FPS:-8}"
 JPEG_QUALITY="${RTIPVD_STREAM_JPEG_QUALITY:-70}"
+SHOW_PREVIEW="${RTIPVD_STREAM_SHOW_PREVIEW:-false}"
+
+PREVIEW_ARGS=()
+if [ "$SHOW_PREVIEW" = "true" ]; then
+  PREVIEW_ARGS+=("--show-preview")
+fi
 
 python deploy/raspberry_pi/send_video_and_gps.py \
   --video-source "$VIDEO_SOURCE" \
   --server-url "$SERVER_URL" \
   --target-fps "$SEND_FPS" \
-  --jpeg-quality "$JPEG_QUALITY"
+  --jpeg-quality "$JPEG_QUALITY" \
+  "${PREVIEW_ARGS[@]}"

@@ -1,22 +1,4 @@
-
-from sympy import python
-
-
----
-### **File 18: `scripts/download_weights.py`**
-
----python
-
-"""
-RTIPVD — Weight Downloader
-File: scripts/download_weights.py
-
-Downloads pre-trained YOLOv8 weights if custom weights are not available.
-Useful for quick testing without the custom trained model.
-
-Usage:
-    python scripts/download_weights.py
-"""
+"""Download fallback YOLO weights when custom weights are missing."""
 
 from pathlib import Path
 from ultralytics import YOLO
@@ -38,7 +20,7 @@ def main():
     print(f"[WARNING] Custom weights not found at {custom_weights}")
     print("[INFO] Downloading YOLOv8n pre-trained weights (COCO) as fallback...")
 
-    model = YOLO("yolov8n.pt")
+    YOLO("yolov8n.pt")
 
     # Move downloaded weights to our weights directory
     default_path = Path("yolov8n.pt")

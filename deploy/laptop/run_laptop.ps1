@@ -9,7 +9,29 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 Set-Location $repoRoot
 
 if (-not (Test-Path ".venv")) {
-    py -3.11 -m venv .venv
+    $venvCreated = $false
+
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        python -m venv .venv
+        if (Test-Path ".venv\Scripts\Activate.ps1") {
+            $venvCreated = $true
+        }
+    }
+
+    if (-not $venvCreated -and (Get-Command py -ErrorAction SilentlyContinue)) {
+        py -3.11 -m venv .venv
+        if (Test-Path ".venv\Scripts\Activate.ps1") {
+            $venvCreated = $true
+        }
+    }
+
+    if (-not $venvCreated) {
+        throw "Python 3.11+ was not found. Install Python and retry."
+    }
+}
+
+if (-not (Test-Path ".venv\Scripts\Activate.ps1")) {
+    throw "Virtual environment activation script not found at .venv\\Scripts\\Activate.ps1"
 }
 
 . .\.venv\Scripts\Activate.ps1
