@@ -7,11 +7,18 @@ __pycache__/
 dist/
 build/
 *.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
 
 # ============ Virtual Environment ============
 venv/
 env/
 env311/
+myenv311/
 .venv/
 .env
 
@@ -62,3 +69,14 @@ logs/
 *.bak
 *.tmp
 *.swp
+neuro-ar-readme.md
+
+# ============ Presentations ============
+*.pptx
+*.pdf
+presentations/
+
+# ============ Databases ============
+*.db
+*.sqlite
+*.sqlite3
