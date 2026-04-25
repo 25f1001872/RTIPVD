@@ -42,10 +42,10 @@ def parse_timestamp(value: Optional[str]) -> Optional[datetime]:
 
 @dataclass
 class GPSFix:
-	"""Current GPS fix information."""
+	"""Current GPS fix information. Coordinates must be in WGS84 decimal degrees."""
 
-	latitude: Optional[float] = None
-	longitude: Optional[float] = None
+	latitude: Optional[float] = None  # WGS84 decimal degrees (-90 to +90)
+	longitude: Optional[float] = None  # WGS84 decimal degrees (-180 to +180)
 	satellites: Optional[int] = None
 	heading_deg: Optional[float] = None
 	speed_mps: Optional[float] = None
@@ -80,10 +80,18 @@ class ViolationRecord:
 	screenshot_path: Optional[str] = None
 	video_source: Optional[str] = None
 	confidence: Optional[float] = None
+	parking_status: str = "LEGAL"
+	zone_id: Optional[str] = None
+	zone_name: Optional[str] = None
 
 	def normalized_plate(self) -> str:
 		"""Normalize license plate string before persistence/network sync."""
 		return self.license_plate.strip().upper()
+
+	def normalized_parking_status(self) -> str:
+		"""Normalize parking status to either LEGAL or ILLEGAL."""
+		status = (self.parking_status or "LEGAL").strip().upper()
+		return "ILLEGAL" if status == "ILLEGAL" else "LEGAL"
 
 	def to_db_params(self) -> Dict[str, Any]:
 		"""Convert record into SQLite-compatible named parameters."""
@@ -97,7 +105,29 @@ class ViolationRecord:
 			"screenshot_path": self.screenshot_path,
 			"video_source": self.video_source,
 			"confidence": self.confidence,
+			"parking_status": self.normalized_parking_status(),
+			"zone_id": self.zone_id,
+			"zone_name": self.zone_name,
 		}
+		def to_db_params(self) -> Dict[str, Any]:
+			"""Convert record into SQLite-compatible named parameters, with coordinate transformation."""
+			from src.utils.coordinate_transform import transform_coordinate
+			lat = transform_coordinate(self.latitude) if self.latitude is not None else None
+			lon = transform_coordinate(self.longitude) if self.longitude is not None else None
+			return {
+				"license_plate": self.normalized_plate(),
+				"first_seen": to_utc_timestamp(self.first_seen),
+				"last_seen": to_utc_timestamp(self.last_seen),
+				"duration_sec": float(max(self.duration_sec, 0.0)),
+				"latitude": lat,
+				"longitude": lon,
+				"screenshot_path": self.screenshot_path,
+				"video_source": self.video_source,
+				"confidence": self.confidence,
+				"parking_status": self.normalized_parking_status(),
+				"zone_id": self.zone_id,
+				"zone_name": self.zone_name,
+			}
 
 	def to_api_payload(
 		self,
@@ -110,6 +140,20 @@ class ViolationRecord:
 		if violation_id is not None:
 			payload["id"] = violation_id
 		return payload
+		def to_api_payload(
+			self,
+			violation_id: Optional[int] = None,
+			event_type: str = "updated",
+		) -> Dict[str, Any]:
+			"""Serialize record for backend ingestion endpoint, with coordinate transformation."""
+			from src.utils.coordinate_transform import transform_coordinate
+			payload = self.to_db_params()
+			payload["latitude"] = transform_coordinate(self.latitude) if self.latitude is not None else None
+			payload["longitude"] = transform_coordinate(self.longitude) if self.longitude is not None else None
+			payload["event_type"] = event_type
+			if violation_id is not None:
+				payload["violation_id"] = violation_id
+			return payload
 
 	@classmethod
 	def from_db_row(cls, row: Dict[str, Any]) -> "ViolationRecord":
@@ -128,4 +172,7 @@ class ViolationRecord:
 			screenshot_path=row.get("screenshot_path"),
 			video_source=row.get("video_source"),
 			confidence=row.get("confidence"),
+			parking_status=str(row.get("parking_status", "LEGAL") or "LEGAL").strip().upper(),
+			zone_id=row.get("zone_id"),
+			zone_name=row.get("zone_name"),
 		)

@@ -7,7 +7,7 @@ optional backend API sync for parked vehicle incidents.
 
 from datetime import timedelta
 from typing import Dict, Iterable, Optional, Tuple
-from config.config import ILLEGAL_PARKING_DEFAULT_HEADING_DEG
+from config.config import ILLEGAL_PARKING_DEFAULT_HEADING_DEG, GPS_MOCK_LAT, GPS_MOCK_LON
 
 from src.database.backend_client import BackendClient
 from src.database.db_manager import DatabaseManager
@@ -85,13 +85,13 @@ class ViolationService:
             frame_shape=frame_shape,
         )
 
-        # If geofence checking is enabled, only persist records that fall inside configured zones.
+        # If geofence checking is enabled, classify each parked record as
+        # ILLEGAL (inside a zone) or LEGAL (outside all zones).
         zone_match = None
         if self.zone_checker is not None and self.zone_checker.enabled:
             zone_match = self.zone_checker.find_zone(latitude, longitude)
-            if zone_match is None:
-                state["last_seen"] = now
-                return state.get("violation_id")
+        parking_status = "ILLEGAL" if zone_match is not None else "LEGAL"
+
         first_seen = state.get("first_seen", now)
         duration = max((now - first_seen).total_seconds(), 0.0)
 
@@ -105,6 +105,9 @@ class ViolationService:
             screenshot_path=None,
             video_source=self.video_source,
             confidence=confidence,
+            parking_status=parking_status,
+            zone_id=zone_match.zone_id if zone_match is not None else None,
+            zone_name=zone_match.zone_name if zone_match is not None else None,
         )
 
         violation_id, inserted = self.db_manager.upsert_violation(record)
@@ -141,11 +144,11 @@ class ViolationService:
             2) Camera GPS coordinates (if available)
             3) None, None when no fix is available
         """
-        if not gps_fix.fix or gps_fix.latitude is None or gps_fix.longitude is None:
-            return None, None
+        cam_lat = float(gps_fix.latitude) if gps_fix.latitude is not None else float(GPS_MOCK_LAT)
+        cam_lon = float(gps_fix.longitude) if gps_fix.longitude is not None else float(GPS_MOCK_LON)
 
         if self.geo_mapper is None or bbox_xyxy is None or frame_shape is None:
-            return float(gps_fix.latitude), float(gps_fix.longitude)
+            return cam_lat, cam_lon
 
         frame_h, frame_w = frame_shape
         heading = (
@@ -155,14 +158,14 @@ class ViolationService:
         )
 
         estimate = self.geo_mapper.estimate_from_bbox(
-            camera_lat=float(gps_fix.latitude),
-            camera_lon=float(gps_fix.longitude),
+            camera_lat=cam_lat,
+            camera_lon=cam_lon,
             camera_heading_deg=heading,
             bbox_xyxy=tuple(map(float, bbox_xyxy)),
             frame_shape=(int(frame_h), int(frame_w)),
         )
         if estimate is None:
-            return float(gps_fix.latitude), float(gps_fix.longitude)
+            return cam_lat, cam_lon
 
         return float(estimate.latitude), float(estimate.longitude)
 

@@ -19,10 +19,9 @@ import sys
 from threading import Lock
 from typing import Dict, List
 
+
 import cv2
-
 from flask import Flask, jsonify, request
-
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -44,6 +43,8 @@ from config.config import (
     TRACKER_CONFIG,
     USE_MOCK_OCR,
     WINDOW_NAME,
+    GPS_MOCK_LAT,
+    GPS_MOCK_LON,
 )
 from src.analyzer.parking_analyzer import ParkingAnalyzer
 from src.database.backend_client import BackendClient
@@ -58,6 +59,7 @@ from src.geospatial.zone_checker import NoParkingZoneChecker
 from src.ocr.plate_reader import PlateReader
 from src.preprocessing.frame_processor import FrameProcessor
 from src.streaming.packet import FrameTelemetryPacket
+from src.streaming.ops_state import OpsStateStore
 from src.streaming.sync import GPSSyncBuffer
 from src.visualization.frame_renderer import FrameRenderer
 from src.visualization.stats_overlay import StatsOverlay
@@ -112,7 +114,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--det-iou", type=float, default=0.50, help="Detection IoU threshold")
     parser.add_argument("--imgsz", type=int, default=640, help="Inference image size")
     parser.add_argument("--input-fps", type=float, default=8.0, help="Expected incoming FPS")
+    
     parser.add_argument("--hfov", type=float, default=GEO_MAPPER_HFOV_DEG, help="Camera horizontal FOV")
+    #New arguments for geospatial mapping
+    parser.add_argument("--utm-zone", type=int, default=44, help="UTM zone for coordinate conversion (Dehradun is 44)")
     parser.add_argument(
         "--default-heading",
         type=float,
@@ -214,7 +219,19 @@ def _build_app(args: argparse.Namespace) -> Flask:
         default_heading_deg=args.default_heading,
     )
 
+    if zone_checker.enabled and not zone_checker.is_ready:
+        print(
+            "[STREAM SERVER] WARNING: Geofence enabled but no zones were loaded. "
+            f"Check GeoJSON path: {args.zone_geojson}"
+        )
+    if zone_checker.enabled and zone_checker.is_ready:
+        print(
+            f"[STREAM SERVER] Geofence active with {zone_checker.zone_count} zone(s): "
+            f"{zone_checker.geojson_path}"
+        )
+
     gps_sync = GPSSyncBuffer(max_size=1024)
+    ops_store = OpsStateStore()
 
     csv_path = Path(args.log_csv)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -260,16 +277,46 @@ def _build_app(args: argparse.Namespace) -> Flask:
                 ]
             )
 
+    def _has_usable_coords(gps_fix: GPSFix) -> bool:
+        if gps_fix.latitude is None or gps_fix.longitude is None:
+            return False
+        try:
+            lat = float(transform_coordinate(gps_fix.latitude))
+            lon = float(transform_coordinate(gps_fix.longitude))
+        except (TypeError, ValueError):
+            return False
+        # Treat (0, 0) as a placeholder/no-fix coordinate for stream processing.
+        if abs(lat) < 1e-9 and abs(lon) < 1e-9:
+            return False
+        return True
+
     def _resolve_gps(packet: FrameTelemetryPacket) -> GPSFix:
         parsed_fix = gps_sync.parse_fix(packet.gps)
-        if parsed_fix.fix and parsed_fix.latitude is not None and parsed_fix.longitude is not None:
+        lat = parsed_fix.latitude
+        lon = parsed_fix.longitude
+        if parsed_fix.fix and _has_usable_coords(parsed_fix):
+            parsed_fix.latitude = lat
+            parsed_fix.longitude = lon
             gps_sync.add_fix(parsed_fix)
             return parsed_fix
-
+        # Some senders may provide valid coordinates but omit or mis-set the fix flag.
+        # Accept these as best-effort coordinates for projection.
+        if (not parsed_fix.fix) and _has_usable_coords(parsed_fix):
+            coords_only = GPSFix(
+                latitude=lat,
+                longitude=lon,
+                satellites=parsed_fix.satellites,
+                heading_deg=parsed_fix.heading_deg,
+                speed_mps=parsed_fix.speed_mps,
+                fix=True,
+                source=f"{parsed_fix.source}:coords_only",
+                timestamp=parsed_fix.timestamp,
+            )
+            gps_sync.add_fix(coords_only)
+            return coords_only
         matched = gps_sync.get_closest(packet.frame_timestamp_utc)
         if matched is not None:
             return matched
-
         return GPSFix(
             latitude=None,
             longitude=None,
@@ -299,6 +346,9 @@ def _build_app(args: argparse.Namespace) -> Flask:
             and gps_fix.latitude is not None
             and gps_fix.longitude is not None
         )
+
+        cam_lat = float(gps_fix.latitude) if gps_fix.latitude is not None else float(GPS_MOCK_LAT)
+        cam_lon = float(gps_fix.longitude) if gps_fix.longitude is not None else float(GPS_MOCK_LON)
 
         heading = gps_fix.heading_deg if gps_fix.heading_deg is not None else args.default_heading
 
@@ -349,6 +399,7 @@ def _build_app(args: argparse.Namespace) -> Flask:
         parked_count = 0
         active_track_ids = set()
         read_plates: Dict[int, str] = {}
+        parked_for_ops: List[dict] = []
 
         if boxes is not None:
             for box in boxes:
@@ -398,29 +449,43 @@ def _build_app(args: argparse.Namespace) -> Flask:
                     if violation_id is not None:
                         stats["violations_upserted"] += 1
 
-                estimate = None
-                if has_camera_fix:
-                    estimate = mapper.estimate_from_bbox(
-                        camera_lat=float(gps_fix.latitude),
-                        camera_lon=float(gps_fix.longitude),
-                        camera_heading_deg=float(heading),
-                        bbox_xyxy=(float(x1), float(y1), float(x2), float(y2)),
-                        frame_shape=(frame_h, frame_w),
+                estimate = mapper.estimate_from_bbox(
+                    camera_lat=cam_lat,
+                    camera_lon=cam_lon,
+                    camera_heading_deg=float(heading),
+                    bbox_xyxy=(float(x1), float(y1), float(x2), float(y2)),
+                    frame_shape=(frame_h, frame_w),
+                )
+
+                parking_status = "LEGAL"
+                zone_id = None
+                zone_name = None
+                if status == "PARKED" and zone_checker is not None and zone_checker.enabled:
+                    zone_match = zone_checker.find_zone(
+                        estimate.latitude if estimate is not None else None,
+                        estimate.longitude if estimate is not None else None,
                     )
+                    if zone_match is not None:
+                        parking_status = "ILLEGAL"
+                        zone_id = zone_match.zone_id
+                        zone_name = zone_match.zone_name
 
                 row = {
                     "sequence_id": packet.sequence_id,
                     "frame_timestamp_utc": packet.frame_timestamp_utc,
                     "track_id": track_id,
                     "status": status,
+                    "parking_status": parking_status,
+                    "zone_id": zone_id,
+                    "zone_name": zone_name,
                     "plate_text": plate_text,
                     "violation_id": violation_id,
                     "class_id": cls_id,
                     "class_label": detector.get_label(cls_id),
                     "bbox": [x1, y1, x2, y2],
                     "motion_px": motion_mag,
-                    "camera_lat": gps_fix.latitude,
-                    "camera_lon": gps_fix.longitude,
+                    "camera_lat": cam_lat,
+                    "camera_lon": cam_lon,
                     "camera_heading": heading,
                     "vehicle_lat": estimate.latitude if estimate is not None else None,
                     "vehicle_lon": estimate.longitude if estimate is not None else None,
@@ -431,6 +496,19 @@ def _build_app(args: argparse.Namespace) -> Flask:
                 }
                 detections.append(row)
                 stats["detections_logged"] += 1
+
+                if status == "PARKED":
+                    parked_for_ops.append(
+                        {
+                            "track_id": track_id,
+                            "plate_text": plate_text,
+                            "parking_status": parking_status,
+                            "latitude": row["vehicle_lat"],
+                            "longitude": row["vehicle_lon"],
+                            "confidence": det_conf,
+                            "bbox": [x1, y1, x2, y2],
+                        }
+                    )
 
                 if writer is not None:
                     writer.writerow(
@@ -448,8 +526,8 @@ def _build_app(args: argparse.Namespace) -> Flask:
                             x2,
                             y2,
                             round(motion_mag, 3),
-                            gps_fix.latitude,
-                            gps_fix.longitude,
+                            cam_lat,
+                            cam_lon,
                             round(float(heading), 3),
                             round(estimate.latitude, 8) if estimate is not None else None,
                             round(estimate.longitude, 8) if estimate is not None else None,
@@ -514,6 +592,25 @@ def _build_app(args: argparse.Namespace) -> Flask:
         if write_fp is not None:
             write_fp.close()
 
+        gps_timestamp = None
+        if getattr(gps_fix, "timestamp", None) is not None:
+            gps_timestamp = gps_fix.timestamp.isoformat()
+
+        ops_store.update_frame(display_frame, packet.sequence_id, jpeg_quality=65)
+        ops_store.update_gps(
+            {
+                "latitude": cam_lat,
+                "longitude": cam_lon,
+                "heading_deg": heading,
+                "speed_mps": gps_fix.speed_mps,
+                "satellites": gps_fix.satellites,
+                "fix": gps_fix.fix,
+                "source": gps_fix.source,
+                "timestamp": gps_timestamp,
+            }
+        )
+        ops_store.update_plates(parked_for_ops, orig_frame=orig_frame)
+
         return detections
 
     def _cleanup() -> None:
@@ -543,6 +640,10 @@ def _build_app(args: argparse.Namespace) -> Flask:
                 "display_enabled": args.show_display,
             }
         )
+
+    @app.get("/ops/state")
+    def ops_state():
+        return jsonify(ops_store.get_state())
 
     @app.post("/ingest/frame")
     def ingest_frame():
@@ -578,9 +679,13 @@ def main() -> int:
     print(f"[STREAM SERVER] Listening on http://{args.host}:{args.port}")
     print(f"[STREAM SERVER] CSV log: {args.log_csv}")
     print(f"[STREAM SERVER] Parking mode: {'enabled' if args.enable_parking else 'disabled'}")
+    print(
+        f"[STREAM SERVER] Geofence: {'enabled' if args.zone_enabled else 'disabled'} "
+        f"({args.zone_geojson})"
+    )
     print(f"[STREAM SERVER] DB: {'enabled' if not args.disable_db else 'disabled'} ({args.db_path})")
     print(f"[STREAM SERVER] Display: {'enabled' if args.show_display else 'disabled'}")
-    app.run(host=args.host, port=args.port, debug=False)
+    app.run(host=args.host, port=args.port, debug=False, threaded=False)
     return 0
 
 

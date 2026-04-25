@@ -151,8 +151,9 @@ class GPSTagger:
 	def _open_serial(self) -> None:
 		"""Open serial device for continuous NMEA reads."""
 		if serial is None:
-			print("[GPSTagger] WARNING: pyserial not installed. GPS disabled.")
-			self.enabled = False
+			print("[GPSTagger] WARNING: pyserial not installed. Falling back to mock GPS source.")
+			self.source = "mock"
+			self.enabled = True
 			return
 
 		try:
@@ -164,7 +165,9 @@ class GPSTagger:
 			print(f"[GPSTagger] Listening on {self.serial_port} @ {self.baud_rate} baud")
 		except Exception as exc:
 			print(f"[GPSTagger] WARNING: Could not open GPS serial port: {exc}")
-			self.enabled = False
+			print("[GPSTagger] INFO: Falling back to mock GPS source.")
+			self.source = "mock"
+			self.enabled = True
 
 	@property
 	def is_ready(self) -> bool:

@@ -7,6 +7,47 @@ from src.database.models import GPSFix
 from src.streaming.packet import parse_iso_ts
 
 
+def _to_float(value) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _convert_coordinate(coord: float) -> Optional[float]:
+    """Convert raw GPS coordinate (ddmm.mmmm) using specific formula."""
+    if coord is None:
+        return None
+
+    try:
+        coord = float(coord)
+    except (TypeError, ValueError):
+        return None
+
+    # First step divide the receiving coordinate by 100
+    divided = coord / 100.0
+
+    sign = -1.0 if divided < 0 else 1.0
+    divided = abs(divided)
+
+    # Got (x.y) two part one fractional (after decimal (y)) and one before decimal (x)
+    x = int(divided)
+    y = divided - x
+
+    # Second step divide the fractional(y) again by 0.6
+    y_converted = y / 0.6
+
+    return sign * (x + y_converted)
+
+
+def _is_valid_lat_lon(latitude: Optional[float], longitude: Optional[float]) -> bool:
+    if latitude is None or longitude is None:
+        return False
+    return -90.0 <= latitude <= 90.0 and -180.0 <= longitude <= 180.0
+
+
 class GPSSyncBuffer:
     """Stores recent GPS fixes and resolves nearest fix for a frame timestamp."""
 
@@ -50,13 +91,49 @@ class GPSSyncBuffer:
         if ts is None:
             ts = datetime.now(timezone.utc)
 
+        source = str(payload.get("source", "stream"))
+        coord_format = str(
+            payload.get("coord_format")
+            or payload.get("gps_format")
+            or payload.get("coordinate_format")
+            or ""
+        ).strip().lower()
+        force_div100 = coord_format in {
+            "ddmm_div100",
+            "ddmm/100",
+            "legacy_ddmm",
+            "legacy_ddmm_div100",
+        }
+
+        latitude = _to_float(payload.get("latitude"))
+        if latitude is None:
+            latitude = _to_float(payload.get("lat"))
+        if latitude is not None:
+            latitude = _convert_coordinate(latitude)
+
+        longitude = _to_float(payload.get("longitude"))
+        if longitude is None:
+            longitude = _to_float(payload.get("lon"))
+        if longitude is not None:
+            longitude = _convert_coordinate(longitude)
+
+        if not _is_valid_lat_lon(latitude, longitude):
+            latitude = None
+            longitude = None
+
+        has_coords = latitude is not None and longitude is not None
+        if "fix" in payload:
+            fix = bool(payload.get("fix", False)) and has_coords
+        else:
+            fix = has_coords
+
         return GPSFix(
-            latitude=payload.get("latitude"),
-            longitude=payload.get("longitude"),
+            latitude=latitude,
+            longitude=longitude,
             satellites=payload.get("satellites"),
             heading_deg=payload.get("heading_deg"),
             speed_mps=payload.get("speed_mps"),
-            fix=bool(payload.get("fix", False)),
-            source=str(payload.get("source", "stream")),
+            fix=fix,
+            source=source,
             timestamp=ts,
         )

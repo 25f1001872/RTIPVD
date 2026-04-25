@@ -1,14 +1,6 @@
-"""
-Vehicle geospatial projection for RTIPVD.
-
-Given camera GPS coordinates and frame-space detections, this module
-estimates each detected vehicle's latitude and longitude.
-"""
-
 import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
-
 
 EARTH_RADIUS_M = 6378137.0
 
@@ -16,7 +8,6 @@ EARTH_RADIUS_M = 6378137.0
 @dataclass
 class GeoEstimate:
     """Estimated world position for one detected vehicle."""
-
     latitude: float
     longitude: float
     distance_m: float
@@ -96,15 +87,9 @@ class VehicleGeoMapper:
         frame_shape: Tuple[int, int],
     ) -> Optional[GeoEstimate]:
         """
-        Estimate geolocation for one detected box.
-
-        Args:
-            camera_lat: Camera latitude in decimal degrees.
-            camera_lon: Camera longitude in decimal degrees.
-            camera_heading_deg: Camera heading in degrees (0 = North).
-            bbox_xyxy: Detection box as (x1, y1, x2, y2).
-            frame_shape: Tuple of (height, width).
+        Estimate geolocation for one detected box from WGS84 inputs.
         """
+
         frame_h, frame_w = frame_shape
         x1, y1, x2, y2 = bbox_xyxy
 
@@ -122,6 +107,8 @@ class VehicleGeoMapper:
         bearing_offset = norm_offset * (self.horizontal_fov_deg / 2.0)
 
         absolute_bearing = self._normalize_heading(camera_heading_deg + bearing_offset)
+        
+        # 2. Project standard Lat/Lon to new destination
         est_lat, est_lon = self._destination_point(
             camera_lat,
             camera_lon,

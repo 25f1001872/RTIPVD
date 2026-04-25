@@ -11,6 +11,8 @@ param(
     [switch]$DisableParking,
     [switch]$ShowDisplay,
     [switch]$UseMockOcr,
+    [switch]$DisableZone,
+    [string]$ZoneGeoJson = "data/geofencing/No_Parking_Zones.geojson",
     [switch]$EnableBackend,
     [string]$BackendUrl = "http://127.0.0.1:5000/api/violations",
     [string]$BackendApiKey = "",
@@ -67,7 +69,8 @@ $pythonArgs = @(
     "--device", $Device,
     "--tracker-config", $TrackerConfig,
     "--input-fps", "$InputFps",
-    "--db-path", $DbPath
+    "--db-path", $DbPath,
+    "--zone-geojson", $ZoneGeoJson
 )
 
 if ($DisableDb) {
@@ -86,6 +89,12 @@ if ($ShowDisplay) {
 
 if ($UseMockOcr) {
     $pythonArgs += "--use-mock-ocr"
+}
+
+if ($DisableZone) {
+    $pythonArgs += "--zone-disabled"
+} else {
+    $pythonArgs += "--zone-enabled"
 }
 
 if ($EnableBackend) {

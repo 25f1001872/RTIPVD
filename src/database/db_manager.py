@@ -43,18 +43,28 @@ class DatabaseManager:
 		self._conn.row_factory = sqlite3.Row
 
 	def _ensure_schema(self) -> None:
-		"""Initialize database tables from SQL migration script."""
+		"""Initialize database tables and safely migrate older schemas."""
 		if self._conn is None:
 			return
 
+		# Ensure the core table exists even if migration script is missing.
+		self._ensure_table_exists()
+
+		# Upgrade legacy DBs first so schema/index statements can run safely.
+		self._ensure_columns()
+
+		# Apply migration script last (idempotent CREATE IF NOT EXISTS statements).
 		if self.schema_path.exists():
 			script = self.schema_path.read_text(encoding="utf-8")
 			with self._lock:
 				self._conn.executescript(script)
 				self._conn.commit()
+
+	def _ensure_table_exists(self) -> None:
+		"""Create base violations table when DB is empty or migration script is unavailable."""
+		if self._conn is None:
 			return
 
-		# Fallback if migration file is missing.
 		fallback = """
 		CREATE TABLE IF NOT EXISTS violations (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,12 +77,47 @@ class DatabaseManager:
 			screenshot_path TEXT,
 			video_source TEXT,
 			confidence REAL,
+			parking_status TEXT NOT NULL DEFAULT 'LEGAL',
+			zone_id TEXT,
+			zone_name TEXT,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(license_plate, first_seen)
 		);
 		"""
+
 		with self._lock:
+			assert self._conn is not None
 			self._conn.executescript(fallback)
+			self._conn.commit()
+
+	def _ensure_columns(self) -> None:
+		"""Ensure new columns exist for databases created with older schema."""
+		if self._conn is None:
+			return
+
+		required_columns = {
+			"parking_status": "TEXT NOT NULL DEFAULT 'LEGAL'",
+			"zone_id": "TEXT",
+			"zone_name": "TEXT",
+		}
+
+		with self._lock:
+			assert self._conn is not None
+			cursor = self._conn.cursor()
+			cursor.execute("PRAGMA table_info(violations)")
+			existing = {str(row[1]) for row in cursor.fetchall()}
+
+			for column_name, column_def in required_columns.items():
+				if column_name in existing:
+					continue
+				cursor.execute(
+					f"ALTER TABLE violations ADD COLUMN {column_name} {column_def}"
+				)
+
+			cursor.execute(
+				"CREATE INDEX IF NOT EXISTS idx_violations_status ON violations(parking_status)"
+			)
+
 			self._conn.commit()
 
 	@property
@@ -134,7 +179,10 @@ class DatabaseManager:
 								longitude = COALESCE(:longitude, longitude),
 								screenshot_path = COALESCE(:screenshot_path, screenshot_path),
 								video_source = COALESCE(:video_source, video_source),
-								confidence = COALESCE(:confidence, confidence)
+								confidence = COALESCE(:confidence, confidence),
+								parking_status = :parking_status,
+								zone_id = :zone_id,
+								zone_name = :zone_name
 							WHERE id = :id
 							""",
 							{
@@ -156,7 +204,10 @@ class DatabaseManager:
 					longitude,
 					screenshot_path,
 					video_source,
-					confidence
+					confidence,
+					parking_status,
+					zone_id,
+					zone_name
 				) VALUES (
 					:license_plate,
 					:first_seen,
@@ -166,7 +217,10 @@ class DatabaseManager:
 					:longitude,
 					:screenshot_path,
 					:video_source,
-					:confidence
+					:confidence,
+					:parking_status,
+					:zone_id,
+					:zone_name
 				)
 				""",
 				params,

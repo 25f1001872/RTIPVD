@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS violations (
     screenshot_path TEXT,                   -- path to saved frame image
     video_source    TEXT,                   -- source video filename
     confidence      REAL,                   -- average YOLO detection confidence
+    parking_status  TEXT NOT NULL DEFAULT 'LEGAL', -- LEGAL or ILLEGAL
+    zone_id         TEXT,                   -- matched geofence zone id (if any)
+    zone_name       TEXT,                   -- matched geofence zone name (if any)
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
 
     -- Index on plate for fast lookups
@@ -39,3 +42,7 @@ CREATE INDEX IF NOT EXISTS idx_violations_date
 -- Index for searching by plate
 CREATE INDEX IF NOT EXISTS idx_violations_plate
     ON violations(license_plate);
+
+-- Index for legal/illegal dashboard filtering
+CREATE INDEX IF NOT EXISTS idx_violations_status
+    ON violations(parking_status);

@@ -42,10 +42,10 @@ def parse_timestamp(value: Optional[str]) -> Optional[datetime]:
 
 @dataclass
 class GPSFix:
-	"""Current GPS fix information."""
+		"""Current GPS fix information. Coordinates must be in WGS84 decimal degrees."""
 
-	latitude: Optional[float] = None
-	longitude: Optional[float] = None
+		latitude: Optional[float] = None  # WGS84 decimal degrees (-90 to +90)
+		longitude: Optional[float] = None  # WGS84 decimal degrees (-180 to +180)
 	satellites: Optional[int] = None
 	heading_deg: Optional[float] = None
 	speed_mps: Optional[float] = None

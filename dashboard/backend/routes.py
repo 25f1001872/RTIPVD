@@ -1,7 +1,10 @@
 """REST API routes for the RTIPVD backend."""
 
-from flask import Blueprint, Flask, current_app, jsonify, request
+from pathlib import Path
 
+from flask import Blueprint, Flask, abort, current_app, jsonify, request, send_from_directory
+
+from config.config import SCREENSHOTS_DIR
 from src.database.models import ViolationRecord, parse_timestamp, utc_now
 
 
@@ -22,6 +25,46 @@ def _to_float(value, default=None):
 		return float(value)
 	except (TypeError, ValueError):
 		return default
+
+
+def _convert_raw_gps_to_decimal(raw_value: float, max_degrees: float):
+	"""Convert raw GPS ddmm.mmmm format to decimal degrees using /100 then /0.6 formula.
+	
+	Args:
+		raw_value: Raw GPS value (e.g., 2951.6747 for latitude, 7753.8555 for longitude)
+		max_degrees: Max allowed degrees (90 for latitude, 180 for longitude)
+	
+	Returns:
+		Converted decimal degrees or None if invalid.
+	"""
+	if raw_value is None:
+		return None
+	try:
+		value = float(raw_value)
+	except (TypeError, ValueError):
+		return None
+
+	# If already in decimal degrees range, return as-is
+	if abs(value) <= max_degrees:
+		return value
+
+	# Otherwise, apply conversion: /100 then fractional /0.6
+	value_div100 = value / 100.0
+	sign = -1.0 if value_div100 < 0 else 1.0
+	value_div100 = abs(value_div100)
+	
+	degrees = int(value_div100)
+	fraction = value_div100 - degrees
+
+	# Validate range [0, 0.60)
+	if fraction < 0.0 or fraction >= 0.60:
+		return None
+
+	decimal = degrees + (fraction / 0.6)
+	if decimal > max_degrees:
+		return None
+
+	return sign * decimal
 
 
 def register_routes(app: Flask) -> None:
@@ -52,6 +95,22 @@ def register_routes(app: Flask) -> None:
 		records = db_manager.list_recent(limit=limit)
 		return jsonify({"count": len(records), "items": records})
 
+	@api.get("/screenshots/<path:filename>")
+	def get_screenshot(filename: str):
+		base_dir = Path(SCREENSHOTS_DIR).resolve()
+		safe_name = Path(filename).name
+		candidate = (base_dir / safe_name).resolve()
+
+		try:
+			candidate.relative_to(base_dir)
+		except ValueError:
+			abort(404)
+
+		if not candidate.is_file():
+			abort(404)
+
+		return send_from_directory(str(base_dir), safe_name)
+
 	@api.post("/violations")
 	def upsert_violation():
 		if not _require_api_key():
@@ -71,16 +130,28 @@ def register_routes(app: Flask) -> None:
 		if duration is None:
 			duration = max((last_seen - first_seen).total_seconds(), 0.0)
 
+		# Ensure coordinates are in WGS84 decimal degrees (convert raw ddmm.mmmm if needed)
+		latitude = _to_float(payload.get("latitude"), None)
+		if latitude is not None and abs(latitude) > 90:
+			latitude = _convert_raw_gps_to_decimal(latitude, max_degrees=90.0)
+
+		longitude = _to_float(payload.get("longitude"), None)
+		if longitude is not None and abs(longitude) > 180:
+			longitude = _convert_raw_gps_to_decimal(longitude, max_degrees=180.0)
+
 		record = ViolationRecord(
 			license_plate=plate,
 			first_seen=first_seen,
 			last_seen=last_seen,
 			duration_sec=duration,
-			latitude=_to_float(payload.get("latitude"), None),
-			longitude=_to_float(payload.get("longitude"), None),
+			latitude=latitude,
+			longitude=longitude,
 			screenshot_path=payload.get("screenshot_path"),
 			video_source=payload.get("video_source"),
 			confidence=_to_float(payload.get("confidence"), None),
+			parking_status=str(payload.get("parking_status", "LEGAL") or "LEGAL"),
+			zone_id=payload.get("zone_id"),
+			zone_name=payload.get("zone_name"),
 		)
 
 		db_manager = current_app.config["DB_MANAGER"]

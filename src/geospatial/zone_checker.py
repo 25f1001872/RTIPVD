@@ -56,11 +56,36 @@ class NoParkingZoneChecker:
         geojson_path: str = ILLEGAL_PARKING_GEOJSON_PATH,
     ):
         self.enabled = bool(enabled)
-        self.geojson_path = Path(geojson_path)
+        self.geojson_path = self._resolve_geojson_path(Path(geojson_path))
         self._zones: List[Dict[str, Any]] = []
 
         if self.enabled:
             self._load_geojson()
+
+    @staticmethod
+    def _resolve_geojson_path(path: Path) -> Path:
+        """
+        Resolve GeoJSON path robustly across case-sensitive/case-insensitive filesystems.
+
+        If the exact file path does not exist, this attempts a case-insensitive match in
+        the same directory (for example: no_parking_zones.geojson vs No_Parking_Zones.geojson).
+        """
+        if path.exists():
+            return path
+
+        parent = path.parent
+        if not parent.exists() or not parent.is_dir():
+            return path
+
+        target_name = path.name.lower()
+        try:
+            for candidate in parent.iterdir():
+                if candidate.is_file() and candidate.name.lower() == target_name:
+                    return candidate
+        except OSError:
+            return path
+
+        return path
 
     @property
     def zone_count(self) -> int:
